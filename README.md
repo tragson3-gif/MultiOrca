@@ -2,13 +2,21 @@
 
 **OrcaSlicer for mixed-nozzle Snapmaker U1 printing.** MultiOrca is an experimental fork built around the U1's four independent toolheads. It builds on [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer) and [LixNix's multi-nozzle and multi-layer-height fork](https://github.com/LixNix/OrcaSlicer-multi-nozzle-size-printing).
 
-> **Current status:** The source is available here, but there is no packaged MultiOrca release yet. The author's Windows build has completed its first four-color test print; verify your G-code and printer configuration before relying on it for other prints. Some preset values refresh when the process preset is selected again after a nozzle change.
+> **Current status:** The source is available here, but there is no packaged MultiOrca release yet. The author's Windows build has completed its first three-color, mixed-nozzle test print; verify your G-code and printer configuration before relying on it for other prints. Some preset values refresh when the process preset is selected again after a nozzle change.
 
 ## First print
 
 ![First MultiOrca print: purple, black, and white IN/OUT test piece on the Snapmaker U1 build plate](images/first-multiorca-print.jpg)
 
-The first MultiOrca test print finished in **9 minutes**. Its purple base, white border and letters, and black letters show the four-color design on the U1 build plate. This is one completed test print, not a claim that every combination of nozzles and layer heights has been validated.
+The first MultiOrca test print finished in **9 minutes**. It uses three colors and two nozzle/layer-height combinations:
+
+| Color | Nozzle | Layer height |
+| --- | --- | --- |
+| Purple | 0.6 mm | 0.4 mm |
+| White | 0.4 mm | 0.2 mm |
+| Black | 0.4 mm | 0.2 mm |
+
+This is one completed mixed-nozzle test print, not a claim that every combination of nozzles and layer heights has been validated.
 
 ## What it adds
 
