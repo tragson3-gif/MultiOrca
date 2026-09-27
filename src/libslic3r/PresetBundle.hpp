@@ -37,6 +37,11 @@ enum class VendorType {
 };
 namespace Slic3r {
 
+// Convert absolute U1 process widths using the nozzle size encoded in its
+// original system preset name. Returns true when a value was changed.
+bool normalize_u1_process_line_widths(DynamicPrintConfig &config, const std::string &vendor_name,
+                                      const std::string &preset_name);
+
 struct AMSMapInfo
 {
     /*for new ams mapping*/ // from struct FilamentInfo

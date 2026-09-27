@@ -1,5 +1,6 @@
 #include <cassert>
 #include <chrono>
+#include <cmath>
 #include <ctime>
 #include <sstream>
 
@@ -6594,6 +6595,59 @@ void PresetBundle::load_config_file_config(const std::string &name_or_path, bool
     BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << boost::format(": finished");
 }
 
+// Old installed Snapmaker profiles and their preset caches can outlive updated
+// resource JSON. Normalize only stock U1 process widths before storing them.
+bool normalize_u1_process_line_widths(DynamicPrintConfig &config, const std::string &vendor_name,
+                                      const std::string &preset_name)
+{
+    if (vendor_name != "Snapmaker")
+        return false;
+
+    std::string nozzle_text;
+    const size_t named = preset_name.find("@Snapmaker U1 (");
+    if (named != std::string::npos) {
+        const size_t start = named + std::string("@Snapmaker U1 (").size();
+        const size_t end = preset_name.find(" nozzle)", start);
+        if (end == std::string::npos || end + 8 != preset_name.size())
+            return false;
+        nozzle_text = preset_name.substr(start, end - start);
+    } else if (preset_name.rfind("fdm_process_U1", 0) == 0) {
+        const size_t explicit_nozzle = preset_name.find("_nozzle_");
+        if (explicit_nozzle != std::string::npos)
+            nozzle_text = preset_name.substr(explicit_nozzle + 8);
+        else if (preset_name.size() > 7 && preset_name.compare(preset_name.size() - 7, 7, "_common") == 0) {
+            const size_t start = std::string("fdm_process_U1_").size();
+            if (preset_name.size() > start + 7)
+                nozzle_text = preset_name.substr(start, preset_name.size() - start - 7);
+        }
+        if (nozzle_text.empty())
+            nozzle_text = "0.4";
+    } else {
+        return false;
+    }
+
+    size_t parsed = 0;
+    const double nozzle = string_to_double_decimal_point(nozzle_text, &parsed);
+    if (parsed != nozzle_text.size() || nozzle <= 0)
+        return false; // Includes mixed-size names such as 0.4+0.6; those already use percentages.
+
+    static const char *const widths[] = {
+        "line_width", "initial_layer_line_width", "outer_wall_line_width",
+        "inner_wall_line_width", "top_surface_line_width", "sparse_infill_line_width",
+        "internal_solid_infill_line_width", "support_line_width"
+    };
+    bool changed = false;
+    for (const char *key : widths) {
+        if (auto *value = config.option<ConfigOptionFloatOrPercent>(key);
+            value && !value->percent && value->value > 0) {
+            value->value = std::round(100.0 * value->value / nozzle);
+            value->percent = true;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
 // Orca: load one source-form preset entry — parsed from its JSON subfile just
 // now, or deserialized from the vendor's cache; the code is shared so a
 // cache-loaded bundle cannot come out different from a JSON-loaded one.
@@ -6669,6 +6723,8 @@ std::string PresetBundle::load_vendor_preset(
         config.apply(it->second);
     }
     config.apply(entry.config_src);
+    if (presets_collection->type() == Preset::TYPE_PRINT)
+        normalize_u1_process_line_widths(config, vendor_name, preset_name);
     // Record what a base states, its diff against the default, for the presets
     // that include it. It is taken before extend_default_config_length pads every
     // per-variant key to the base's variant count: the padded defaults would

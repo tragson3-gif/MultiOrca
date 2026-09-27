@@ -24,6 +24,7 @@ This is one completed mixed-nozzle test print, not a claim that every combinatio
 | --- | --- |
 | Different nozzle sizes and layer heights for T0–T3 | Printer and process settings |
 | Separate speed settings for each toolhead | Process → Speed → toolhead tabs |
+| Whole-number line widths based on each stock U1 process's intended nozzle size | Process → Quality → Line width |
 | Speed starting points matched to the nearest U1 nozzle preset (0.2, 0.4, 0.6, or 0.8 mm) | Select a U1 process preset after setting nozzle sizes |
 | Chamber cooling/heating target for each filament | Filament settings |
 | Starting chamber target, 25–75 °C in 5 °C steps; default 40 °C | Upload/print dialog |
@@ -32,6 +33,8 @@ This is one completed mixed-nozzle test print, not a claim that every combinatio
 | Object exclusion enabled in the U1 process defaults | Process settings |
 
 The **cooling/heating** label leaves room for a future heater. The current printer macro controls chamber **cooling through the exhaust fan**; it does not drive a heater.
+
+Stock U1 process line widths are expressed as whole-number percentages of their intended nozzle diameter. For example, 0.42 mm in a 0.4 mm process becomes 105%, and 0.62 mm in a 0.6 mm process becomes 103% (rounded to the nearest whole percent). Orca applies those percentages to the *actual* nozzle selected for each tool. Small changes in absolute width are expected from rounding. Existing custom process presets and project overrides retain their saved widths; you can set those to percentages manually if you want them to scale too.
 
 ### Example mixed-nozzle setup
 

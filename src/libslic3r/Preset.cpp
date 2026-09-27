@@ -1818,6 +1818,24 @@ void PresetCollection::load_presets(
                             << "\" contains the following incorrect keys: " << incorrect_keys << ", which were removed";
                     }
 
+                    // Personal U1 process presets inherit the original nozzle
+                    // size through their system ancestor. Convert their own
+                    // absolute overrides too, and keep a copy of the JSON
+                    // before writing the migrated preset.
+                    if (m_type == Preset::TYPE_PRINT && inherit_preset && !read_only) {
+                        const Preset *ancestor = inherit_preset;
+                        while (ancestor && !ancestor->is_system)
+                            ancestor = this->get_preset_parent(*ancestor);
+                        if (ancestor && ancestor->is_system &&
+                            normalize_u1_process_line_widths(preset.config, "Snapmaker", ancestor->name)) {
+                            const fs::path backup = preset.file + ".before-line-width-percent";
+                            if (!fs::exists(backup))
+                                fs::copy_file(preset.file, backup);
+                            preset.save(&inherit_preset->config);
+                            BOOST_LOG_TRIVIAL(info) << "Converted personal U1 process widths: " << preset.name;
+                        }
+                    }
+
                     if (preset.type == Preset::TYPE_FILAMENT && preset.is_user() && preset.inherits().empty()) {
                         auto compatible_printers = dynamic_cast<ConfigOptionStrings *>(preset.config.option("compatible_printers", true));
                         if (compatible_printers && compatible_printers->values.empty()) {
