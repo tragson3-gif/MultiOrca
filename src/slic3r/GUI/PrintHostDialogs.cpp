@@ -11,6 +11,7 @@
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
 #include <wx/checkbox.h>
+#include <wx/spinctrl.h>
 #include <wx/button.h>
 #include <wx/dataview.h>
 #include <wx/dcbuffer.h>
@@ -510,6 +511,28 @@ void PrintHostSendDialog::init()
     content_sizer->Add(checkbox_sizer);
     content_sizer->AddSpacer(VERT_SPACING);
 
+    if (m_show_u1_chamber_target) {
+        auto *chamber = new wxBoxSizer(wxHORIZONTAL);
+        chamber->Add(new wxStaticText(this, wxID_ANY, _L("Chamber cooling/heating target:")),
+                     0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(8));
+        m_u1_chamber_target = new wxSpinCtrl(this, wxID_ANY, wxEmptyString, wxDefaultPosition,
+                                           wxDefaultSize, wxSP_ARROW_KEYS, 25, 75, 40);
+        m_u1_chamber_target->SetIncrement(5);
+        chamber->Add(m_u1_chamber_target, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(3));
+        chamber->Add(new wxStaticText(this, wxID_ANY, _L("°C")), 0, wxALIGN_CENTER_VERTICAL);
+        content_sizer->Add(chamber, 0, wxBOTTOM, FromDIP(8));
+    }
+    if (m_u1_flow_calibration) {
+        content_sizer->Add(new wxStaticText(this, wxID_ANY, _L("Flow calibration for this print:")));
+        auto *tools = new wxBoxSizer(wxHORIZONTAL);
+        for (unsigned tool = 0; tool < 4; ++tool) {
+            m_u1_calibration_checkboxes[tool] = new wxCheckBox(this, wxID_ANY, wxString::Format("T%u", tool));
+            tools->Add(m_u1_calibration_checkboxes[tool], 0, wxRIGHT, FromDIP(14));
+        }
+        content_sizer->Add(tools, 0, wxTOP | wxBOTTOM, FromDIP(5));
+        content_sizer->AddSpacer(VERT_SPACING);
+    }
+
     if (size_t extension_start = recent_path.find_last_of('.'); extension_start != std::string::npos)
         m_valid_suffix = recent_path.substr(extension_start);
     // .gcode suffix control
@@ -584,6 +607,23 @@ void PrintHostSendDialog::init()
             txt_filename->SetSelection(recent_path_len, recent_path_len + stem_len);
         });
     });
+}
+
+unsigned PrintHostSendDialog::u1_flow_calibration_tools() const
+{
+    unsigned tools = 0;
+    for (unsigned tool = 0; tool < 4; ++tool)
+        if (m_u1_calibration_checkboxes[tool] && m_u1_calibration_checkboxes[tool]->GetValue())
+            tools |= 1u << tool;
+    return tools;
+}
+
+int PrintHostSendDialog::u1_chamber_target() const
+{
+    if (!m_u1_chamber_target)
+        return 0;
+    const int value = std::clamp(m_u1_chamber_target->GetValue(), 25, 75);
+    return 25 + 5 * ((value - 25 + 2) / 5);
 }
 
 fs::path PrintHostSendDialog::filename() const

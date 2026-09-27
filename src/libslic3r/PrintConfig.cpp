@@ -5591,7 +5591,7 @@ void PrintConfigDef::init_fff_params()
     def->tooltip = L("Users can decide project file names when exporting.");
     def->full_width = true;
     def->mode = comAdvanced;
-    def->set_default_value(new ConfigOptionString("{input_filename_base}_{filament_type[initial_tool]}_{print_time}.gcode"));
+    def->set_default_value(new ConfigOptionString("{input_filename_base}.gcode"));
 
     def = this->add("make_overhang_printable", coBool);
     def->label = L("Make overhangs printable");

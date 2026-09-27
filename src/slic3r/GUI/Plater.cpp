@@ -20555,6 +20555,12 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
         } else {
             pDlg = std::make_unique<PrintHostSendDialog>(default_output_file, upload_job.printhost->get_post_upload_actions(), groups,
                                                          storage_paths, storage_names, config->get_bool("open_device_tab_post_upload"));
+            if (!use_3mf && physical_printer_config->opt_string("printer_model") == "Snapmaker U1" &&
+                physical_printer_config->opt_string("machine_start_gcode").find("PRINT_START") != std::string::npos) {
+                pDlg->enable_u1_chamber_target();
+                if (physical_printer_config->opt_string("machine_start_gcode").find("CALIBRATE_FLAGGED_TOOLS") != std::string::npos)
+                    pDlg->enable_u1_flow_calibration();
+            }
         }
 
         pDlg->init();
@@ -20570,6 +20576,8 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
         upload_job.upload_data.group       = pDlg->group();
         upload_job.upload_data.storage     = pDlg->storage();
         upload_job.upload_data.extended_info = pDlg->extendedInfo();
+        upload_job.upload_data.u1_flow_calibration_tools = pDlg->u1_flow_calibration_tools();
+        upload_job.upload_data.u1_chamber_target = pDlg->u1_chamber_target();
         // Orca: gcode inside a .gcode.3mf is index-coded (Metadata/plate_<N>.gcode) and a bundle may
         // carry several of them, so the upload must name which plate to print via a 1-based plateindex.
         // Even a single-plate bundle needs it, since its gcode entry is still indexed. The host upload

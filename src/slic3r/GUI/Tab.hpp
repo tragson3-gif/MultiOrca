@@ -284,6 +284,7 @@ protected:
     m_highlighter;
 
 	DynamicPrintConfig 	m_cache_config;
+    std::vector<double> m_last_speed_nozzle_diameters;
     std::vector<std::string> m_cache_options;
 
 
@@ -459,6 +460,7 @@ public:
     virtual void				set_custom_gcode(const t_config_option_key& opt_key, const std::string& value);
 
     void        update_extruder_variants(int extruder_id = -1, bool reload = true);
+    void        refresh_nozzle_speed_defaults();
     void        switch_excluder(int extruder_id = -1, bool reload = true);
     void        sync_excluder();
 	void        parse_extruder_selection(int selection, int &extruder_id, NozzleVolumeType &nozzle_type);

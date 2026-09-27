@@ -26,6 +26,7 @@
 #include "libslic3r/libslic3r.h"
 
 #include <cassert>
+#include <fstream>
 #include <stdexcept>
 #include <cctype>
 
@@ -968,6 +969,46 @@ void BackgroundSlicingProcess::prepare_upload()
                                              m_fff_print->full_print_config());
                 if (post_process)
                     m_upload_job.upload_data.upload_path = output_name_str;
+            }
+            const unsigned tools = m_upload_job.upload_data.u1_flow_calibration_tools;
+            const int chamber_target = m_upload_job.upload_data.u1_chamber_target;
+            if (tools != 0 || chamber_target != 0) {
+                // Put one-shot requests inside the job itself. This keeps queued jobs
+                // independent of flags set on the printer by later uploads.
+                const boost::filesystem::path staged = source_path.string() + ".u1flags";
+                std::ifstream input(source_path.string(), std::ios::binary);
+                std::ofstream output(staged.string(), std::ios::binary | std::ios::trunc);
+                if (!input || !output)
+                    throw Slic3r::RuntimeError("Unable to prepare U1 flow calibration requests.");
+                bool inserted = false;
+                bool has_calibration_macro = false;
+                std::string line;
+                while (std::getline(input, line)) {
+                    const bool crlf = !line.empty() && line.back() == '\r';
+                    std::string command = line;
+                    if (crlf) command.pop_back();
+                    if (command == "CALIBRATE_FLAGGED_TOOLS") has_calibration_macro = true;
+                    if (command == "PRINT_START") {
+                        if (inserted)
+                            throw Slic3r::RuntimeError("More than one PRINT_START in U1 G-code; calibration requests were not sent.");
+                        const char *eol = crlf ? "\r\n" : "\n";
+                        for (unsigned tool = 0; tool < 4; ++tool)
+                            if (tools & (1u << tool))
+                                output << "FLOW_CAL_T" << tool << eol;
+                        output << line << '\n';
+                        if (chamber_target != 0)
+                            output << "SET_CHAMBER_TARGET TARGET=" << chamber_target << " RANGE=10" << eol;
+                        inserted = true;
+                        continue;
+                    }
+                    output << line << '\n';
+                }
+                input.close();
+                output.close();
+                if (!inserted || (tools != 0 && !has_calibration_macro) || !output)
+                    throw Slic3r::RuntimeError("U1 G-code needs PRINT_START and, when flow calibration is selected, CALIBRATE_FLAGGED_TOOLS.");
+                boost::filesystem::remove(source_path);
+                boost::filesystem::rename(staged, source_path);
             }
         }
     } else {

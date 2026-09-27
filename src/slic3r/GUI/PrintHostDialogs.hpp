@@ -16,7 +16,9 @@
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/ProjectTask.hpp"
 class wxButton;
+class wxCheckBox;
 class wxTextCtrl;
+class wxSpinCtrl;
 class wxComboBox;
 class ComboBox;
 class wxDataViewListCtrl;
@@ -41,6 +43,10 @@ public:
     std::string group() const;
     std::string storage() const;
     bool switch_to_device_tab() const {return m_switch_to_device_tab;}
+    void enable_u1_flow_calibration() { m_u1_flow_calibration = true; }
+    void enable_u1_chamber_target() { m_show_u1_chamber_target = true; }
+    unsigned u1_flow_calibration_tools() const;
+    int u1_chamber_target() const;
 
     virtual void EndModal(int ret) override;
     virtual void init();
@@ -55,6 +61,10 @@ protected:
     wxString    m_preselected_storage;
     wxArrayString m_paths;
     bool m_switch_to_device_tab;
+    bool m_u1_flow_calibration{false};
+    bool m_show_u1_chamber_target{false};
+    wxCheckBox* m_u1_calibration_checkboxes[4]{nullptr, nullptr, nullptr, nullptr};
+    wxSpinCtrl* m_u1_chamber_target{nullptr};
 
     boost::filesystem::path m_path;
     PrintHostPostUploadActions m_post_actions;

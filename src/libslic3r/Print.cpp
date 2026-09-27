@@ -5455,7 +5455,14 @@ std::string Print::output_filename(const std::string &filename_base) const
     }
     config.set_key_value("filament_name", new ConfigOptionString(filament_name));
 
-    return this->PrintBase::output_filename(m_config.filename_format.value, ".gcode", filename_base, &config);
+    // Some saved U1 projects still contain an older Snapmaker filename template
+    // that the placeholder parser cannot read. Keep user-defined valid formats.
+    constexpr const char *legacy_u1_filename =
+        "{input_filename_base}_{filament_type[initial_no_support_extruder]}_{int(total_weight*10) / 10.0}g_{print_time}.gcode";
+    const std::string &format = m_config.filename_format.value;
+    const std::string safe_format = m_config.printer_model.value == "Snapmaker U1" && format == legacy_u1_filename
+        ? "{input_filename_base}.gcode" : format;
+    return this->PrintBase::output_filename(safe_format, ".gcode", filename_base, &config);
 }
 
 std::string Print::get_model_name() const

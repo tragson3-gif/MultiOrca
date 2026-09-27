@@ -63,6 +63,10 @@
 
 #include "DeviceCore/DevManager.h"
 
+#include <cmath>
+#include <limits>
+#include <stdexcept>
+
 #ifdef WIN32
 	#include <commctrl.h>
 #endif // WIN32
@@ -4487,15 +4491,21 @@ void TabFilament::build()
         //
 
         optgroup = page->new_optgroup(L("Print chamber temperature"), L"param_chamber_temp");
-        optgroup->append_single_option_line("activate_chamber_temp_control", "material_temperatures#print-chamber-temperature");
-        line = { L("Chamber temperature"), L("Target chamber temperature, and the minimal chamber temperature at which printing should start") };
+        const bool u1_chamber_cooling = m_preset_bundle->printers.get_edited_preset().config.opt_string("printer_model") == "Snapmaker U1";
+        if (!u1_chamber_cooling || m_config->option<ConfigOptionBools>("activate_chamber_temp_control")->get_at(0))
+            optgroup->append_single_option_line("activate_chamber_temp_control", "material_temperatures#print-chamber-temperature");
+        line = u1_chamber_cooling
+            ? Line{ L("Chamber cooling/heating target"), L("Set the U1 chamber target. The installed cooling macro uses this value now; a future heating macro can use it too. 0 leaves the existing filament G-code target in effect.") }
+            : Line{ L("Chamber temperature"), L("Target chamber temperature, and the minimal chamber temperature at which printing should start") };
         line.label_path = "material_temperatures#print-chamber-temperature";
         Option chamber_temp_target_opt = optgroup->get_option("chamber_temperature");
-        chamber_temp_target_opt.opt.label = L("Target");
+        chamber_temp_target_opt.opt.label = u1_chamber_cooling ? L("Target °C") : L("Target");
         line.append_option(chamber_temp_target_opt);
-        Option chamber_min_temp_opt = optgroup->get_option("chamber_minimal_temperature");
-        chamber_min_temp_opt.opt.label = L("Minimal");
-        line.append_option(chamber_min_temp_opt);
+        if (!u1_chamber_cooling) {
+            Option chamber_min_temp_opt = optgroup->get_option("chamber_minimal_temperature");
+            chamber_min_temp_opt.opt.label = L("Minimal");
+            line.append_option(chamber_min_temp_opt);
+        }
         optgroup->append_line(line);
         optgroup->m_on_change = [this](t_config_option_key opt_key, boost::any value) {
             DynamicPrintConfig& filament_config = m_preset_bundle->filaments.get_edited_preset().config;
@@ -5808,6 +5818,12 @@ if (is_marlin_flavor)
                     }
                 }
 
+                if (opt_key == "nozzle_diameter" || opt_key.rfind("nozzle_diameter#", 0) == 0) {
+                    // Refresh before printer preset updates can reload the process tab and
+                    // replace the remembered nozzle diameters with the new ones.
+                    for (Tab *tab : wxGetApp().tabs_list)
+                        tab->refresh_nozzle_speed_defaults();
+                }
                 update_dirty();
                 on_value_change(opt_key, value);
                 update();
@@ -6503,6 +6519,11 @@ void Tab::load_current_preset()
 {
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__<<boost::format(": enter, m_type %1%")%Preset::get_type_string(m_type);
     const Preset& preset = m_presets->get_edited_preset();
+    if (m_type == Preset::TYPE_PRINT && m_config &&
+        m_preset_bundle->printers.get_edited_preset().config.opt_string("printer_model") == "Snapmaker U1" &&
+        m_config->opt_string("filename_format") ==
+            "{input_filename_base}_{filament_type[initial_no_support_extruder]}_{int(total_weight*10) / 10.0}g_{print_time}.gcode")
+        m_config->option<ConfigOptionString>("filename_format")->value = "{input_filename_base}.gcode";
     std::vector<std::string> prev_variant_list;
     int prev_extruder_count = 0;
 
@@ -6519,6 +6540,7 @@ void Tab::load_current_preset()
             wxGetApp().obj_list()->update_objects_list_filament_column(1);
     }
     if (m_type == Preset::TYPE_PRINT) {
+        m_last_speed_nozzle_diameters.clear();
         if (auto tab = wxGetApp().plate_tab) {
             tab->m_config->apply(*m_config);
             tab->update_extruder_variants();
@@ -7368,8 +7390,8 @@ bool Tab::tree_sel_change_delayed(wxCommandEvent& event)
         m_parent->set_active_tab(this);
         if (m_variant_sizer) {
             wxWindow *variant_ctrl = m_extruder_switch ? (wxWindow *) m_extruder_switch : m_variant_combo;
-            m_main_sizer->Show(m_variant_sizer, variant_ctrl->IsThisEnabled() && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder "));
-            if (m_extruder_sync) m_extruder_sync->Show(variant_ctrl->IsShown());
+            m_main_sizer->Show(m_variant_sizer, variant_ctrl->IsThisEnabled() && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder ") && (m_type != Preset::TYPE_PRINT || m_active_page->title() == "Speed"));
+            if (m_extruder_sync) m_extruder_sync->Show(variant_ctrl->IsShown() && m_preset_bundle->get_printer_extruder_count() == 2);
             GetParent()->Layout();
         }
 
@@ -7384,8 +7406,8 @@ bool Tab::tree_sel_change_delayed(wxCommandEvent& event)
     m_active_page = page;
     if (m_variant_sizer) {
         wxWindow *variant_ctrl = m_extruder_switch ? (wxWindow *) m_extruder_switch : m_variant_combo;
-        m_main_sizer->Show(m_variant_sizer, variant_ctrl->IsThisEnabled() && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder"));
-        if (m_extruder_sync) m_extruder_sync->Show(variant_ctrl->IsShown());
+        m_main_sizer->Show(m_variant_sizer, variant_ctrl->IsThisEnabled() && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder") && (m_type != Preset::TYPE_PRINT || m_active_page->title() == "Speed"));
+        if (m_extruder_sync) m_extruder_sync->Show(variant_ctrl->IsShown() && m_preset_bundle->get_printer_extruder_count() == 2);
         GetParent()->Layout();
     }
 
@@ -8204,6 +8226,109 @@ void Tab::set_just_edit(bool just_edit)
 void Tab::update_extruder_variants(int extruder_id, bool reload)
 {
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << extruder_id;
+    if (m_type == Preset::TYPE_PRINT) {
+        const auto *diameters = m_preset_bundle->printers.get_edited_preset().config.option<ConfigOptionFloats>("nozzle_diameter");
+        if (diameters && m_last_speed_nozzle_diameters.empty())
+            m_last_speed_nozzle_diameters = diameters->values;
+    }
+    if (m_type == Preset::TYPE_PRINT && m_config->opt_string("filename_format") ==
+        "{input_filename_base}_{filament_type[initial_no_support_extruder]}_{int(total_weight*10) / 10.0}g_{print_time}.gcode") {
+        // Older Snapmaker profiles and saved projects carry a template that throws
+        // after slicing finishes. Correct only that exact legacy value.
+        m_config->option<ConfigOptionString>("filename_format")->value = "{input_filename_base}.gcode";
+    }
+    // Custom multi-tool process presets start with one variant column. Give the
+    // speed editor a column for each tool before binding its per-tool fields.
+    if (m_type == Preset::TYPE_PRINT && m_preset_bundle->get_printer_extruder_count() > 1) {
+        auto *ids = m_config->option<ConfigOptionInts>("print_extruder_id");
+        auto *variants = m_config->option<ConfigOptionStrings>("print_extruder_variant");
+        const auto *printer_variants = m_preset_bundle->printers.get_edited_preset().config.option<ConfigOptionStrings>("extruder_variant_list");
+        if (ids && variants && printer_variants && ids->size() == 1 && variants->size() == 1) {
+            std::vector<int> new_ids;
+            std::vector<std::string> new_variants;
+            for (size_t tool = 0; tool < printer_variants->size(); ++tool) {
+                std::vector<std::string> tokens;
+                boost::split(tokens, printer_variants->get_at(tool), boost::is_any_of(","), boost::token_compress_on);
+                for (std::string &token : tokens) {
+                    boost::trim(token);
+                    if (!token.empty()) {
+                        new_ids.push_back(int(tool) + 1);
+                        new_variants.push_back(token);
+                    }
+                }
+            }
+            if (new_ids.size() > 1) {
+                ids->values = std::move(new_ids);
+                variants->values = std::move(new_variants);
+                const auto *diameters = m_preset_bundle->printers.get_edited_preset().config.option<ConfigOptionFloats>("nozzle_diameter");
+                const Preset &selected = m_presets->get_selected_preset();
+                const std::string &name = selected.name;
+                const size_t family_end = name.find(" @Snapmaker U1 (");
+                const size_t family_start = name.find(' ');
+                const std::string family = family_start != std::string::npos && family_end != std::string::npos && family_start < family_end
+                    ? name.substr(family_start + 1, family_end - family_start - 1) : "";
+                const double process_height = m_config->opt_float("layer_height");
+                std::vector<const Preset *> baselines(ids->size(), nullptr);
+                if (diameters && !family.empty()) {
+                    for (size_t slot = 0; slot < ids->size(); ++slot) {
+                        const size_t tool = size_t(ids->values[slot] - 1);
+                        if (tool >= diameters->size())
+                            continue;
+                        double best_nozzle_difference = std::numeric_limits<double>::max();
+                        double best_height_difference = std::numeric_limits<double>::max();
+                        for (const Preset &candidate : m_presets->get_presets()) {
+                            if (!candidate.is_system)
+                                continue;
+                            const std::string prefix = " " + family + " @Snapmaker U1 (";
+                            const size_t start = candidate.name.find(prefix);
+                            const size_t end = start == std::string::npos ? std::string::npos : candidate.name.find(" nozzle)", start + prefix.size());
+                            if (end == std::string::npos || end + 8 != candidate.name.size())
+                                continue;
+                            try {
+                                const double candidate_height = std::stod(candidate.name);
+                                const std::string nozzle_text = candidate.name.substr(start + prefix.size(), end - start - prefix.size());
+                                size_t parsed = 0;
+                                const double candidate_nozzle = std::stod(nozzle_text, &parsed);
+                                if (parsed != nozzle_text.size())
+                                    continue;
+                                const double nozzle_difference = std::abs(candidate_nozzle - diameters->get_at(tool));
+                                const double height_difference = std::abs(candidate_height - process_height);
+                                if (nozzle_difference < best_nozzle_difference - 0.00001 ||
+                                    (std::abs(nozzle_difference - best_nozzle_difference) < 0.00001 && height_difference < best_height_difference)) {
+                                    baselines[slot] = &candidate;
+                                    best_nozzle_difference = nozzle_difference;
+                                    best_height_difference = height_difference;
+                                }
+                            } catch (const std::invalid_argument &) {
+                                continue;
+                            } catch (const std::out_of_range &) {
+                                continue;
+                            }
+                        }
+                    }
+                }
+                for (const std::string &key : print_options_with_variant) {
+                    if (key == "print_extruder_id" || key == "print_extruder_variant")
+                        continue;
+                    auto *option = dynamic_cast<ConfigOptionVectorBase *>(m_config->option(key));
+                    if (!option || option->size() != 1)
+                        continue;
+                    const ConfigOption *selected_value = selected.config.option(key);
+                    const bool use_baseline = selected_value && *option == *selected_value;
+                    option->resize(ids->size(), option);
+                    if (use_baseline && key != "top_solid_infill_flow_ratio") {
+                        for (size_t slot = 0; slot < baselines.size(); ++slot) {
+                            if (baselines[slot]) {
+                                const auto *source = dynamic_cast<const ConfigOptionVectorBase *>(baselines[slot]->config.option(key));
+                                if (source && source->size() != 0)
+                                    option->set_at(source, slot, 0);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     if (m_extruder_switch) {
         auto    nozzle_volumes = m_preset_bundle->project_config.option<ConfigOptionEnumsGeneric>("nozzle_volume_type");
         int extruder_nums = m_preset_bundle->get_printer_extruder_count();
@@ -8215,7 +8340,7 @@ void Tab::update_extruder_variants(int extruder_id, bool reload)
 
         // Orca: a non-Bambu dual-nozzle printer has two extruders but a single variant column, so
         // the nozzle switch and sync button have nothing to act on. Only enable with real variants.
-        if (extruder_nums == 2 && m_preset_bundle->support_different_extruders()) {
+        if (extruder_nums > 1 && (m_type == Preset::TYPE_PRINT || (extruder_nums == 2 && m_preset_bundle->support_different_extruders()))) {
             auto options = generate_extruder_options();
             m_extruder_switch->SetOptions(options);
 
@@ -8232,7 +8357,7 @@ void Tab::update_extruder_variants(int extruder_id, bool reload)
 
             m_extruder_switch->SetSelection(selection_index);
             m_extruder_switch->Enable(true);
-            m_extruder_sync->Enable(true);
+            m_extruder_sync->Enable(extruder_nums == 2);
         } else {
             m_extruder_switch->Enable(false);
             m_extruder_sync->Enable(false);
@@ -8256,9 +8381,86 @@ void Tab::update_extruder_variants(int extruder_id, bool reload)
     }
     if (m_variant_sizer) {
         wxWindow *variant_ctrl = m_extruder_switch ? (wxWindow *) m_extruder_switch : m_variant_combo;
-        m_main_sizer->Show(m_variant_sizer, variant_ctrl->IsThisEnabled() && m_active_page && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder "));
-        if (m_extruder_sync) m_extruder_sync->Show(variant_ctrl->IsShown());
+        m_main_sizer->Show(m_variant_sizer, variant_ctrl->IsThisEnabled() && m_active_page && !m_active_page->m_opt_id_map.empty() && !m_active_page->title().StartsWith("Extruder ") && (m_type != Preset::TYPE_PRINT || m_active_page->title() == "Speed"));
+        if (m_extruder_sync) m_extruder_sync->Show(variant_ctrl->IsShown() && m_preset_bundle->get_printer_extruder_count() == 2);
         GetParent()->Layout();
+    }
+}
+
+void Tab::refresh_nozzle_speed_defaults()
+{
+    if (m_type != Preset::TYPE_PRINT || !m_config || !m_presets)
+        return;
+    const auto &printer = m_preset_bundle->printers.get_edited_preset();
+    if (printer.config.opt_string("printer_model") != "Snapmaker U1")
+        return;
+    const auto *diameters = printer.config.option<ConfigOptionFloats>("nozzle_diameter");
+    const auto *ids = m_config->option<ConfigOptionInts>("print_extruder_id");
+    if (!diameters || !ids || ids->size() == 0) return;
+    if (m_last_speed_nozzle_diameters.empty()) {
+        m_last_speed_nozzle_diameters = diameters->values;
+        return;
+    }
+    const std::string &name = m_presets->get_selected_preset().name;
+    const size_t family_end = name.find(" @Snapmaker U1 (");
+    const size_t family_start = name.find(' ');
+    if (family_start == std::string::npos || family_end == std::string::npos || family_start >= family_end)
+        return;
+    const std::string family = name.substr(family_start + 1, family_end - family_start - 1);
+    const double height = m_config->opt_float("layer_height");
+    const auto baseline = [this, &family, height](double nozzle) -> const Preset * {
+        const Preset *best = nullptr;
+        double best_nozzle = std::numeric_limits<double>::max();
+        double best_height = std::numeric_limits<double>::max();
+        const std::string prefix = " " + family + " @Snapmaker U1 (";
+        for (const Preset &candidate : m_presets->get_presets()) {
+            if (!candidate.is_system) continue;
+            const size_t start = candidate.name.find(prefix);
+            const size_t end = start == std::string::npos ? std::string::npos : candidate.name.find(" nozzle)", start + prefix.size());
+            if (end == std::string::npos || end + 8 != candidate.name.size()) continue;
+            try {
+                size_t parsed = 0;
+                const std::string nozzle_text = candidate.name.substr(start + prefix.size(), end - start - prefix.size());
+                const double candidate_nozzle = std::stod(nozzle_text, &parsed);
+                if (parsed != nozzle_text.size()) continue;
+                const double nozzle_diff = std::abs(candidate_nozzle - nozzle);
+                const double height_diff = std::abs(std::stod(candidate.name) - height);
+                if (nozzle_diff < best_nozzle - 0.00001 ||
+                    (std::abs(nozzle_diff - best_nozzle) < 0.00001 && height_diff < best_height)) {
+                    best = &candidate;
+                    best_nozzle = nozzle_diff;
+                    best_height = height_diff;
+                }
+            } catch (const std::invalid_argument &) {
+            } catch (const std::out_of_range &) {
+            }
+        }
+        return best;
+    };
+    bool changed = false;
+    for (size_t slot = 0; slot < ids->size(); ++slot) {
+        const int tool_id = ids->values[slot] - 1;
+        if (tool_id < 0 || size_t(tool_id) >= diameters->size() || size_t(tool_id) >= m_last_speed_nozzle_diameters.size())
+            continue;
+        const double old_nozzle = m_last_speed_nozzle_diameters[tool_id];
+        const double new_nozzle = diameters->get_at(tool_id);
+        if (std::abs(old_nozzle - new_nozzle) < 0.00001) continue;
+        const Preset *new_preset = baseline(new_nozzle);
+        if (!new_preset) continue;
+        for (const std::string &key : print_options_with_variant) {
+            if (key == "print_extruder_id" || key == "print_extruder_variant" || key == "top_solid_infill_flow_ratio") continue;
+            auto *current = dynamic_cast<ConfigOptionVectorBase *>(m_config->option(key));
+            const auto *after = dynamic_cast<const ConfigOptionVectorBase *>(new_preset->config.option(key));
+            if (!current || !after || current->size() <= slot || after->size() == 0)
+                continue;
+            current->set_at(after, slot, 0);
+            changed = true;
+        }
+    }
+    m_last_speed_nozzle_diameters = diameters->values;
+    if (changed) {
+        update_dirty();
+        reload_config();
     }
 }
 
@@ -8317,6 +8519,10 @@ std::vector<wxString> Tab::generate_extruder_options()
 
     std::string pt = m_preset_bundle->printers.get_edited_preset().get_printer_type(m_preset_bundle);
     for (int i = 0; i < extruder_nums; ++i) {
+        if (m_type == Preset::TYPE_PRINT && extruder_nums > 2) {
+            options.push_back(wxString::Format("T%d", i));
+            continue;
+        }
         int ext_id = (i == 0) ? DEPUTY_EXTRUDER_ID : MAIN_EXTRUDER_ID;
         wxString extruder_name = _L(DevPrinterConfigUtil::get_toolhead_display_name(
             pt, ext_id, ToolHeadComponent::Nozzle, ToolHeadNameCase::TitleCase, true));
@@ -8417,8 +8623,8 @@ void Tab::switch_excluder(int extruder_id, bool reload)
     if (m_extruder_switch) {
         int current_extruder = get_current_active_extruder();
         bool sync_enable = get_extruder_sync_enable_state(current_extruder);
-        m_extruder_sync->Enable(m_extruder_switch->IsThisEnabled() && sync_enable);
-        m_extruder_sync->Show();
+        m_extruder_sync->Enable(m_extruder_switch->IsThisEnabled() && sync_enable && m_preset_bundle->get_printer_extruder_count() == 2);
+        m_extruder_sync->Show(m_preset_bundle->get_printer_extruder_count() == 2);
         if (m_type != Preset::TYPE_PRINTER) {
             if (extruder_id == -1)
                 extruder_id = current_extruder;

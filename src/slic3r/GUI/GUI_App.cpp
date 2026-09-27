@@ -27,6 +27,12 @@
 #include <mutex>
 #include <slic3r/plugin/PythonPluginInterface.hpp>
 #include <wx/event.h>
+#ifdef _WIN32
+#include <shobjidl.h>
+#ifdef _MSC_VER
+#pragma comment(lib, "Shell32.lib")
+#endif
+#endif
 
 // Localization headers: include libslic3r version first so everything in this file
 // uses the slic3r/GUI version (the macros will take precedence over the functions).
@@ -2712,6 +2718,11 @@ void GUI_App::init_single_instance_checker(const std::string &name, const std::s
 
 bool GUI_App::OnInit()
 {
+#ifdef _WIN32
+    // Give this fork its own taskbar identity when standard Orca is installed.
+    // Set it before creating the main window so pinned shortcuts keep the fork icon.
+    SetCurrentProcessExplicitAppUserModelID(L"OrcaSlicer.MultiNozzle.U1");
+#endif
     try {
         return on_init_inner();
     } catch (const std::exception& e) {

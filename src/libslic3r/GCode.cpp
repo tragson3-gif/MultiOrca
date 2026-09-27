@@ -4594,6 +4594,14 @@ PlaceholderParserIntegration &ppi = m_placeholder_parser_integration;
         ppi.update_from_gcodewriter(m_writer);
         std::string output = ppi.parser.process(templ, current_filament_id, config_override, &ppi.output_config, &ppi.context);
         ppi.validate_output_vector_variables();
+        if (name == "filament_start_gcode" && m_config.printer_model.value == "Snapmaker U1" &&
+            current_filament_id < m_config.chamber_temperature.size()) {
+            const int target = m_config.chamber_temperature.get_at(current_filament_id);
+            if (target > 0) {
+                if (!output.empty() && output.back() != '\n') output += '\n';
+                output += "SET_CHAMBER_TARGET TARGET=" + std::to_string(target) + " RANGE=10\n";
+            }
+        }
         const CustomGCodeMotionStateChanges motion_state_changes = custom_gcode_motion_state_changes(output);
         if (motion_state_changes.acceleration)
             m_writer.invalidate_acceleration();
